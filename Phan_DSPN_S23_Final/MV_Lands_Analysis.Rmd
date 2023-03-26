@@ -17,8 +17,7 @@ When you click the **Knit** button a document will be generated that includes bo
 ```{r cars}
 MV_Lands = read.table("MV_Lands.csv",sep=",")
 colnames(MV_Lands) = c("MV","Lands")
-lm = lm(Lands~MV,MV_Lands)
-summary(lm)
+
 ```
 
 ## Including Plots
