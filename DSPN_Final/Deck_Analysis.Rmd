@@ -1,0 +1,186 @@
+---
+title: "Analysis"
+output: html_document
+date: "2023-04-04"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+#load libraries
+library(tidyverse)
+library(leaps)
+library(boot)
+library(GGally)
+library(glmnet)
+
+#get data
+setwd("C:/Users/david/Phan_DSPN_S23/DSPN_Final/Databases")
+df = read.csv("deck_data")
+df_adj = df
+head(df_adj)
+
+#categorize archetypes into aggro, control, or combo
+df_adj = df_adj %>%
+  mutate(archetype=case_when(grepl("Aggro",archetype) ~ 'Aggro',
+                            grepl("Control",archetype) ~ 'Control',
+                            grepl("Combo",archetype) ~ 'Combo',
+                            TRUE ~ archetype))
+
+#categorize unique archetypes
+#mtgtop8 categorizes these but I couldn't figure out how to extract that
+unique(df_adj$archetype)
+df_adj = df_adj %>% mutate(archetype=case_when(
+    archetype %in% c("WeenieWhite","DevotiontoGreen","RedDeckWins","Angels",
+                    "ArclightPhoenix","Auras","Elves","Humans","Dragons",
+                    "Goblins","Affinity","Merfolk") ~ "Aggro",
+    archetype %in% c("FiresofInvention","Jund","OmnathRamp",
+                     "NivMizzetReborn","GreenRamp","Enchantress") ~ "Control",
+    archetype %in% c("JeskaiAscendancy","LotusField","Winota","Greasefang",
+                    "Creativity","Transmogrify","GreasefangParhelion",
+                    "Reanimator","NeoformAtraxa","Gyruda","Dragonstorm",
+                    "KinnanEmry","TaintedOracle","JeskaiTurns") ~ "Combo",
+    TRUE ~ archetype))
+
+#drop decks without archetypes
+other = which(df_adj$archetype=="Other")
+df_adj[other,]
+df_adj = df_adj[-other,]
+
+#control for decksize
+df_adj = df_adj %>%
+  mutate(MV=MV/(decksize-lands)) %>%
+  mutate(across(c(lands:other),~ .*60/decksize)) %>%
+  mutate(across(MV0:MV6plus,~ .*60/decksize)) %>%
+  mutate(across(lands:other,round)) %>%
+  mutate(across(MV0:MV6plus,round))
+
+#categorize formats
+df_adj = df_adj %>% mutate(format=case_when(
+                          format %in% c("ST","ALCH") ~ "Rotating",
+                          TRUE ~ "Nonrotating"))
+
+#make sure categorical variables are factors
+df_adj$archetype = as.factor(df_adj$archetype)
+df_adj$companion = as.factor(df_adj$companion)
+df_adj$format = as.factor(df_adj$format)
+
+#split the data
+set.seed(20495)
+test = sample(1:nrow(df_adj),nrow(df_adj)/2)
+df_test = df_adj[test,]
+df_train = df_adj[-test,]
+```
+
+```{r}
+#EDA
+head(df_train)
+summary(df_train)
+pairs = df_train %>%
+        select(lands,mdfcs,cantrips,ramp,companion,MV,archetype,format) %>%
+        ggpairs()
+suppressMessages(print(pairs))
+```
+
+```{r}
+#best fit model
+best_fit = matrix(NA,nrow(df_train),3)
+for (i in 1:nrow(df_train)){
+  glm_cv = regsubsets(lands~MV+mdfcs+cantrips+ramp+companion+archetype+format,
+                      df_train[-i,],
+                      nvmax=30)
+  cv_summary = summary(glm_cv)
+  best_fit[i,] = c(which.min(cv_summary$bic),
+                  which.max(cv_summary$adjr2),
+                  which.min(cv_summary$cp))
+}
+mean(best_fit[,1])
+mean(best_fit[,2])
+mean(best_fit[,3])
+
+glm = glm(lands~MV+mdfcs+cantrips+ramp+companion+archetype+format,
+          data=df_train)
+summary(glm)
+plot(glm)
+```
+
+```{r}
+#bootstrapping
+set.seed(20495)
+boot_func <- function(data, index){  
+    return(coef(glm(lands~MV+mdfcs+cantrips+ramp+companion+archetype+format,
+                    data=data,
+                    subset=index)))
+  }
+
+boot = boot(df_train,boot_func,R=1000)
+boot
+```
+
+```{r}
+#permutation testing
+df_perm = df_train
+perm_coefs = matrix(NA,1000,9)
+colnames(perm_coefs) = c("intercept",
+                         "MV",
+                         "mdfcs",
+                         "cantrips",
+                         "ramp",
+                         "companion",
+                         "combo",
+                         "control",
+                         "format")
+
+set.seed(20495)
+for (i in 1:1000){
+  df_perm = df_perm %>% mutate(across(c(MV,mdfcs,cantrips,ramp,companion,
+                                        archetype,format),
+                                      ~.[sample(nrow(df_perm))]))
+  perm_coefs[i,] = coef(glm(lands ~
+                            MV+mdfcs+cantrips+ramp+companion+archetype+format,
+                            data=df_perm))
+}
+
+#plot null distributions
+for (i in 1:9){
+  hist(perm_coefs[,i],xlab=colnames(perm_coefs)[i])
+}
+
+#get p-values
+p_values = rep(NA,9)
+for (i in 1:9){
+  p_values[i] = ifelse(coef(glm)[i] > mean(perm_coefs[,i]),
+                  sum(perm_coefs[,i]>coef(glm)[i])/nrow(df_train),
+                  sum(perm_coefs[,i]<coef(glm)[i])/nrow(df_train))
+}
+p_values
+```
+
+```{r}
+predict = round(predict(glm,df_test))
+err = predict - df_test$lands
+hist(err)
+hist(abs(err))
+mean(err)
+mean(abs(err))
+```
+
+
+```{r}
+#see mana curves
+MV_dist = df_train %>% group_by(format,archetype) %>%
+          summarise(across(MV:MV6plus, mean)) %>%
+          mutate(across(MV0:MV6plus, round)) %>%
+          data.frame
+MV_dist
+```
+
+
+
+
+
+
+
