@@ -15,13 +15,15 @@ library(tidyverse)
 library(leaps)
 library(boot)
 library(GGally)
-library(glmnet)
 
 #get data
-setwd("C:/Users/david/Phan_DSPN_S23/DSPN_Final/Databases")
+setwd("C:/Users/david/Phan_DSPN_S23/DSPN_Final/Data")
 df = read.csv("deck_data")
 df_adj = df
 head(df_adj)
+names(df_adj)
+
+names(df_adj)[names(df_adj) == 'X'] <- 'deck'
 
 #categorize archetypes into aggro, control, or combo
 df_adj = df_adj %>%
@@ -46,17 +48,16 @@ df_adj = df_adj %>% mutate(archetype=case_when(
     TRUE ~ archetype))
 
 #drop decks without archetypes
-other = which(df_adj$archetype=="Other")
-df_adj[other,]
-df_adj = df_adj[-other,]
+drop = which(df_adj$archetype=="Other" | df_adj$archetype=="Combo")
+df_adj = df_adj[-drop,]
 
 #control for decksize
 df_adj = df_adj %>%
   mutate(MV=MV/(decksize-lands)) %>%
   mutate(across(c(lands:other),~ .*60/decksize)) %>%
-  mutate(across(MV0:MV6plus,~ .*60/decksize)) %>%
+  mutate(across(MV0:MV6.,~ .*60/decksize)) %>%
   mutate(across(lands:other,round)) %>%
-  mutate(across(MV0:MV6plus,round))
+  mutate(across(MV0:MV6.,round))
 
 #categorize formats
 df_adj = df_adj %>% mutate(format=case_when(
@@ -101,8 +102,7 @@ mean(best_fit[,1])
 mean(best_fit[,2])
 mean(best_fit[,3])
 
-glm = glm(lands~MV+mdfcs+cantrips+ramp+companion+archetype+format,
-          data=df_train)
+glm = glm(lands~MV+mdfcs+cantrips+ramp+companion+archetype+format,data=df_train)
 summary(glm)
 plot(glm)
 ```
@@ -123,14 +123,13 @@ boot
 ```{r}
 #permutation testing
 df_perm = df_train
-perm_coefs = matrix(NA,1000,9)
+perm_coefs = matrix(NA,1000,8)
 colnames(perm_coefs) = c("intercept",
                          "MV",
                          "mdfcs",
                          "cantrips",
                          "ramp",
                          "companion",
-                         "combo",
                          "control",
                          "format")
 
@@ -145,13 +144,13 @@ for (i in 1:1000){
 }
 
 #plot null distributions
-for (i in 1:9){
+for (i in 1:8){
   hist(perm_coefs[,i],xlab=colnames(perm_coefs)[i])
 }
 
 #get p-values
-p_values = rep(NA,9)
-for (i in 1:9){
+p_values = rep(NA,8)
+for (i in 1:8){
   p_values[i] = ifelse(coef(glm)[i] > mean(perm_coefs[,i]),
                   sum(perm_coefs[,i]>coef(glm)[i])/nrow(df_train),
                   sum(perm_coefs[,i]<coef(glm)[i])/nrow(df_train))
@@ -170,10 +169,22 @@ mean(abs(err))
 
 
 ```{r}
+summary(glm(lands~MV+ramp+cantrips+mdfcs+companion+archetype,data=df_adj))
 #see mana curves
+df_train %>% group_by(format,archetype) %>% summarize(median(cantrips))
 MV_dist = df_train %>% group_by(format,archetype) %>%
-          summarise(across(MV:MV6plus, mean)) %>%
-          mutate(across(MV0:MV6plus, round)) %>%
+          summarise(across(MV:MV6., mean)) %>%
+          mutate(across(MV0:MV6., round)) %>%
+          data.frame
+MV_dist
+MV_dist = df_train %>% group_by(archetype) %>%
+          summarise(across(MV:MV6., mean)) %>%
+          mutate(across(MV0:MV6., round)) %>%
+          data.frame
+MV_dist
+MV_dist = df_train %>% group_by(format) %>%
+          summarise(across(MV:MV6., mean)) %>%
+          mutate(across(MV0:MV6., round)) %>%
           data.frame
 MV_dist
 ```
