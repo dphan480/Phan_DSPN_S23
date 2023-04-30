@@ -19,14 +19,13 @@ library(GGally)
 #get data
 setwd("C:/Users/david/Phan_DSPN_S23/DSPN_Final/Data")
 df = read.csv("deck_data")
-df_adj = df
-head(df_adj)
-names(df_adj)
 
-names(df_adj)[names(df_adj) == 'X'] <- 'deck'
+head(df)
+names(df)
+names(df)[names(df) == 'X'] <- 'deck'
 
 #categorize archetypes into aggro, control, or combo
-df_adj = df_adj %>%
+df = df %>%
   mutate(archetype=case_when(grepl("Aggro",archetype) ~ 'Aggro',
                             grepl("Control",archetype) ~ 'Control',
                             grepl("Combo",archetype) ~ 'Combo',
@@ -34,8 +33,8 @@ df_adj = df_adj %>%
 
 #categorize unique archetypes
 #mtgtop8 categorizes these but I couldn't figure out how to extract that
-unique(df_adj$archetype)
-df_adj = df_adj %>% mutate(archetype=case_when(
+unique(df$archetype)
+df = df %>% mutate(archetype=case_when(
     archetype %in% c("WeenieWhite","DevotiontoGreen","RedDeckWins","Angels",
                     "ArclightPhoenix","Auras","Elves","Humans","Dragons",
                     "Goblins","Affinity","Merfolk") ~ "Aggro",
@@ -48,11 +47,11 @@ df_adj = df_adj %>% mutate(archetype=case_when(
     TRUE ~ archetype))
 
 #drop decks without archetypes
-drop = which(df_adj$archetype=="Other" | df_adj$archetype=="Combo")
-df_adj = df_adj[-drop,]
+drop = which(df$archetype=="Other" | df$archetype=="Combo")
+df = df[-drop,]
 
 #control for decksize
-df_adj = df_adj %>%
+df = df %>%
   mutate(MV=MV/(decksize-lands)) %>%
   mutate(across(c(lands:other),~ .*60/decksize)) %>%
   mutate(across(MV0:MV6.,~ .*60/decksize)) %>%
@@ -60,20 +59,20 @@ df_adj = df_adj %>%
   mutate(across(MV0:MV6.,round))
 
 #categorize formats
-df_adj = df_adj %>% mutate(format=case_when(
+df = df %>% mutate(format=case_when(
                           format %in% c("ST","ALCH") ~ "Rotating",
                           TRUE ~ "Nonrotating"))
 
 #make sure categorical variables are factors
-df_adj$archetype = as.factor(df_adj$archetype)
-df_adj$companion = as.factor(df_adj$companion)
-df_adj$format = as.factor(df_adj$format)
+df$archetype = as.factor(df$archetype)
+df$companion = as.factor(df$companion)
+df$format = as.factor(df$format)
 
 #split the data
 set.seed(20495)
-test = sample(1:nrow(df_adj),nrow(df_adj)/2)
-df_test = df_adj[test,]
-df_train = df_adj[-test,]
+test = sample(1:nrow(df),nrow(df)/2)
+df_test = df[test,]
+df_train = df[-test,]
 ```
 
 ```{r}
@@ -98,9 +97,9 @@ for (i in 1:nrow(df_train)){
                   which.max(cv_summary$adjr2),
                   which.min(cv_summary$cp))
 }
-mean(best_fit[,1])
-mean(best_fit[,2])
-mean(best_fit[,3])
+table(best_fit[,1])
+table(best_fit[,2])
+table(best_fit[,3])
 
 glm = glm(lands~MV+mdfcs+cantrips+ramp+companion+archetype+format,data=df_train)
 summary(glm)
@@ -169,7 +168,7 @@ mean(abs(err))
 
 
 ```{r}
-summary(glm(lands~MV+ramp+cantrips+mdfcs+companion+archetype,data=df_adj))
+summary(glm(lands~MV+ramp+cantrips+mdfcs+companion+archetype,data=df))
 #see mana curves
 df_train %>% group_by(format,archetype) %>% summarize(median(cantrips))
 MV_dist = df_train %>% group_by(format,archetype) %>%
